@@ -1,0 +1,221 @@
+\documentclass[fleqn,12pt]{article}
+
+%\VignetteIndexEntry{xpipe notes}
+%\VignetteKeywords{programming,IO,utilities}
+%\VignettePackage{xpipe}
+
+\usepackage{times}
+\usepackage[english]{babel}
+\usepackage{hyperref}
+\usepackage{alltt}
+
+\textheight21cm
+\textwidth16cm
+\oddsidemargin0pt
+\evensidemargin0pt
+
+% emulate Rd's \R
+\newcommand{\R}{\texttt{R}}
+\newcommand{\functionname}[1]{\texttt{#1}}
+\newcommand{\varname}[1]{\texttt{#1}}
+\newcommand{\prgname}[1]{\texttt{#1}}
+\newcommand{\filename}[1]{\texttt{#1}}
+\newcommand{\packagename}[1]{\texttt{#1}}
+
+
+\newenvironment{rcode}{\begin{quote}\begin{alltt}}{\end{alltt}\end{quote}}
+
+\begin{document}
+
+\title{Notes on the \packagename{xpipe} Package}
+\author{Jan T. Kim, \texttt{jtk@cmp.uea.ac.uk}}
+\maketitle
+
+\begin{abstract}
+
+  Unnamed pipes allow exchange of data between processes.  Differently
+  from communication via (temporary) files or named pipes, an unnamed
+  pipe cannot be interfered with by other processes. The
+  \functionname{pipe} function provided by the R base package provides
+  pipes for writing xor reading, but it is not possible to obtain file
+  connections to both the input and the output handles of a pipe.
+
+  The objective of the \packagename{xpipe} (for ``extended pipe'' or
+  ``pipe through an external process'') package is to provide a
+  more complete access to unnamed pipes. This is an initial version,
+  much needs to be done. Comments and suggestions are very welcome.
+
+\end{abstract}
+
+
+\section{Introduction: The Problem and the Solution}
+
+Suppose you have a program \prgname{foo} that reads its input from the
+standard input and writes its output to the standard output, and
+implements some algorithm or facility that is not provided by \R{} or
+any of its packages. Let us further assume that in your \R{} program,
+you have a variable \varname{foo.data}, holding the data to be
+processed by \prgname{foo}, and you want to assign the result to
+\varname{foo.result}.
+
+You could write the contents of \varname{foo.data} into some temporary
+input file \filename{foo.in}, call \prgname{foo} with the standard
+output directed to a temporary output file \filename{foo.out}, and
+finally read the result from that output file:
+\begin{rcode}
+write(foo.data, file = "foo.in"));
+system("foo < foo.in > foo.out");
+foo.result <- readLines("foo.out");
+\end{rcode}
+The trouble with this is that you cannot prevent that something
+happens to the temporary files before (or while) they are processed in
+the intended manner. If two \R{} processes are running this sequence of
+calls in the same directory, both will end up with garbled results,
+and as the number of times you run this sequence increases, the
+probability that such a clash occurs asymptotically approaches one.
+
+Of course, there are clever measures you can take to prevent this from
+happening, such as file locking and facilities for generating unique
+file names, but all these are really workarounds that incur
+unnecessary overhead. The solution that avoids such problems once and
+for all is to use an unnamed pipe, known just to the processes
+involved, and therefore safe from any interference by unrelated other
+processes. \R{} provides a \functionname{pipe} function (in the
+\packagename{base} package) for starting a subprocess, but that only
+allows to \emph{either} writing to the subprocess' standard input
+\emph{or} reading form the subprocess' standard output --- \emph{not}
+both.
+
+Part of the reason for this is that one \R{} process cannot do both,
+as blocking may occur and cause the flow of execution to stall. The
+blocking problem is traditionally solved by forking off a child
+process which feeds input into the (external) subprocess and
+terminates when finished doing so. The main \R{} process then reads
+the output provided by the subprocess. The \functionname{xpipe}
+function implements this technique.
+
+
+\section{Examples}
+
+This example is rather contrived and does not have any practical use,
+but it depends only on \prgname{bc} which should be available on any
+reasonable Unix variant.
+
+Use \prgname{bc} to achieve better precision than \R{}'s numeric type:
+<<>>=
+x <- "11111111111111111111";
+x <- as.numeric(x);
+y1 <- x + x;
+y2 <- x + x + 1;
+dy <- y2 - y1;
+sprintf("imprecise result: dy = %g", dy);
+@ 
+
+<<>>=
+library(xpipe);
+
+x <- "11111111111111111111";
+y1 <- xpipe("bc", sprintf("%s + %s", x, x));
+y2 <- xpipe("bc", sprintf("%s + %s + 1", x, x));
+dy <- xpipe("bc", sprintf("%s - %s", y2, y1));
+sprintf("precise result: dy = %s", dy);
+@ 
+
+A more compact and efficient variant (all done in one \prgname{bc}
+process, using \prgname{bc} variables):
+
+<<>>=
+library(xpipe);
+
+x <- "11111111111111111111";
+bclines <- sprintf("y1 = %s + %s", x, x);
+bclines[2] <- sprintf("y2 = %s + %s + 1", x, x);
+bclines[3] <- "dy = y2 - y1";
+bclines[4] <- "dy";
+dy <- xpipe("bc", bclines);
+sprintf("precise result: dy = %s", dy);
+@ 
+
+
+\section{Future Plans}
+
+\begin{itemize}
+
+\item The \functionname{xpipe} function could be made more flexible and
+  useful by
+  \begin{itemize}
+  \item add a verbose argument, for debugging and explanatory /
+    exploratory purposes.
+  \item capability of returning output obtained from the subprocess in
+    numerical rather than in character type. A \texttt{data.frame} would
+    be the next logical target.
+  \item allowing the input data to be provided by a function rather than
+    by a \texttt{character} vector. This would greatly improve
+    efficiency in cases where large amounts of input that can easily be
+    generated are involved (pointless but paradigmatic examples include
+    all natural numbers $1 \ge n \ge 10^8$, this many random numbers etc.etc.).
+  \end{itemize}
+
+\item Arrange for error flagging if there is no pipe / fork support
+  provided by the host platform.
+
+\item As an improved mechanism for detecting \texttt{xpipe} support,
+  provide a \functionname{xpipe.capabilities} function, modelled
+  after \functionname{capabilities} of the \packagename{base}
+  package.
+
+\item In the future, I'd like to see full pipe and fork support move
+  into the mainstream of \R{}, much as \functionname{fifo} is there
+  today. Availability of pipes and fork could be reflected by
+  \functionname{capabilities}, so \R{} programmers would have a
+  reliable and convenient way of telling whether that's available.
+
+\end{itemize}
+
+
+\section{Current Problems}
+
+The most natural way to interface to an \texttt{xpipe} would seem to
+be providing two connections, one for writing and one for
+reading. Unfortunately, the current code structure does not make this
+possible for a package; it would be necessary to modify the \R{}
+source code (\filename{src/main/connection.c}). This source file
+contains a static array \varname{Connections} in which all
+connections are stored, and there does not seem to be an interface for
+registering connections set up by a package like \packagename{xpipe}.
+
+Unfortunately, this makes it rather difficult to read the output of
+the external process through \R{}'s standard data import functions,
+such as \functionname{read.table}. As a cumbersome but generic
+solution, it is possible to open an anonymous file, write the lines
+obtained from \functionname{xpipe} into that using
+\functionname{write}, and read the data back from there using
+\functionname{read.table}, \functionname{scan}, or any other function.
+
+
+\appendix
+
+\section*{Appendix}
+
+This appendix runs tests (it will do in the future) and thus reflects
+the amount of functionality provided by \texttt{xpipe} on the
+host on which \functionname{Sweave} was run.
+
+
+\section{From \R{} to \R{}}
+
+This depends only on \R{}, thus minimising dependencies \texttt{;-)}
+
+<<>>=
+library(xpipe);
+
+set.seed(1);
+num.testvalues <- 1000;
+x <- as.character(runif(num.testvalues));
+y <- xpipe("R --vanilla --slave", sprintf("set.seed(1); write(as.character(runif(%d)), file = \"\");", as.integer(num.testvalues)));
+which(x != y);
+y[x != y];
+@ 
+
+\end{document}
+

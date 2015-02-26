@@ -1,0 +1,12 @@
+Package: xpipe
+Version: 0.0-1
+Title: Read and Write to Piped Process
+Date: 2005-02-02
+Author: Jan T. Kim <jtk@cmp.uea.ac.uk>
+Maintainer: Jan T. Kim <jtk@cmp.uea.ac.uk>
+Depends: R (>= 2.0.0)
+Description: Pipe receiving input from forked child and providing output
+  to main R process
+License: GPL version 2 or newer
+URL: http://www.cmp.uea.ac.uk/~jtk/softwar/xpipe/
+
